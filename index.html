@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live Order Tracking</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      display: none;
+    }
+    #expiredNotice {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: red;
+      color: white;
+      padding: 10px;
+      z-index: 99;
+      display: none;
+      font-weight: bold;
+    }
+    #errorMsg {
+      color: red;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: white;
+      padding: 6px 10px;
+      border: 1px solid red;
+      z-index: 99;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="expiredNotice">This tracking link has expired.</div>
+  <div id="errorMsg"></div>
+  <div id="map"></div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+
+  <!-- Google Maps JS API -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA40-Fss_E_pbEKyCvMJqL_DDJxkAOrdec"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBmZAMmxmHL6riRAOqDJC-f5P0fVtjhmqE",
+      authDomain: "fuel-app-756ae.firebaseapp.com",
+      projectId: "fuel-app-756ae",
+      storageBucket: "fuel-app-756ae.appspot.com",
+      messagingSenderId: "1075562726618",
+      appId: "1:1075562726618:web:d2443d0589b697925251e3"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let map, driverMarker, dropoffMarker, routePolyline;
+    let driverInfoWindow, dropoffInfoWindow;
+    let unsubscribe = null;
+
+    const expiredNotice = document.getElementById('expiredNotice');
+    const mapDiv = document.getElementById('map');
+    const errorMsg = document.getElementById('errorMsg');
+
+    function initMap(center) {
+      map = new google.maps.Map(mapDiv, {
+        zoom: 15,
+        center,
+      });
+      mapDiv.style.display = 'block';
+    }
+
+    function toLatLng(point) {
+      if (!point) return null;
+      if (Array.isArray(point)) return { lat: point[0], lng: point[1] };
+      if (point.latitude !== undefined && point.longitude !== undefined)
+        return { lat: point.latitude, lng: point.longitude };
+      return null;
+    }
+
+    function clearAll() {
+      if (driverMarker) driverMarker.setMap(null);
+      if (dropoffMarker) dropoffMarker.setMap(null);
+      if (routePolyline) routePolyline.setMap(null);
+      if (driverInfoWindow) driverInfoWindow.close();
+      if (dropoffInfoWindow) dropoffInfoWindow.close();
+      driverMarker = dropoffMarker = routePolyline = null;
+      driverInfoWindow = dropoffInfoWindow = null;
+    }
+
+    function removeInfoWindowCloseButton() {
+      setTimeout(() => {
+        const iwOuter = document.querySelector('.gm-style-iw');
+        const closeBtn = iwOuter?.parentNode?.querySelector('button[title="Close"]');
+        if (closeBtn) closeBtn.style.display = 'none';
+      }, 100);
+    }
+
+    function trackOrder(orderId) {
+      if (unsubscribe) unsubscribe();
+      clearAll();
+      expiredNotice.style.display = 'none';
+      errorMsg.style.display = 'none';
+
+      const orderRef = db.collection("orders").doc(orderId);
+
+      unsubscribe = orderRef.onSnapshot(doc => {
+        if (!doc.exists) {
+          errorMsg.textContent = "Order not found.";
+          errorMsg.style.display = 'block';
+          return;
+        }
+
+        const data = doc.data();
+
+        if (["cancelled", "delivered"].includes(data.status)) {
+          expiredNotice.style.display = "block";
+          clearAll();
+          return;
+        }
+
+        const driverLatLng = toLatLng(data.driverLocation);
+        const dropLatLng = toLatLng(data.location);
+
+        if (!map && (driverLatLng || dropLatLng)) {
+          initMap(driverLatLng || dropLatLng);
+        }
+
+        // Driver marker
+        if (driverLatLng) {
+          if (!driverMarker) {
+            driverMarker = new google.maps.Marker({
+              position: driverLatLng,
+              map,
+              icon: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+            });
+            driverInfoWindow = new google.maps.InfoWindow({
+              content: `<div style="font-weight:bold;font-size:13px;padding:4px;background:#d4edda;border:1px solid #c3e6cb;border-radius:4px;color:#155724;">Driver${data.driverName ? ": " + data.driverName : ""}</div>`,
+              disableAutoPan: true,
+              pixelOffset: new google.maps.Size(0, -30),
+              maxWidth: 180,
+            });
+            driverInfoWindow.open(map, driverMarker);
+            removeInfoWindowCloseButton();
+          } else {
+            driverMarker.setPosition(driverLatLng);
+            driverInfoWindow.setContent(`<div style="font-weight:bold;font-size:13px;padding:4px;background:#d4edda;border:1px solid #c3e6cb;border-radius:4px;color:#155724;">Driver${data.driverName ? ": " + data.driverName : ""}</div>`);
+            driverInfoWindow.open(map, driverMarker);
+          }
+          map.setCenter(driverLatLng);
+        }
+
+        // Drop-off marker
+        if (dropLatLng) {
+          if (!dropoffMarker) {
+            dropoffMarker = new google.maps.Marker({
+              position: dropLatLng,
+              map,
+              icon: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+            });
+            dropoffInfoWindow = new google.maps.InfoWindow({
+              content: `<div style="font-weight:bold;font-size:13px;padding:4px;background:#cce5ff;border:1px solid #b8daff;border-radius:4px;color:#004085;">Drop-off</div>`,
+              disableAutoPan: true,
+              pixelOffset: new google.maps.Size(0, -30),
+              maxWidth: 180,
+            });
+            dropoffInfoWindow.open(map, dropoffMarker);
+            removeInfoWindowCloseButton();
+          } else {
+            dropoffMarker.setPosition(dropLatLng);
+          }
+        }
+
+        // Polyline between driver and dropoff
+        if (driverLatLng && dropLatLng) {
+          const route = [driverLatLng, dropLatLng];
+          if (!routePolyline) {
+            routePolyline = new google.maps.Polyline({
+              path: route,
+              geodesic: true,
+              strokeColor: "#FF0000",
+              strokeOpacity: 0.8,
+              strokeWeight: 4,
+              map: map,
+            });
+          } else {
+            routePolyline.setPath(route);
+          }
+        } else if (routePolyline) {
+          routePolyline.setMap(null);
+          routePolyline = null;
+        }
+      }, err => {
+        errorMsg.textContent = "Failed to load tracking data.";
+        errorMsg.style.display = 'block';
+        console.error(err);
+      });
+    }
+
+    // Read ?orderId from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderId = urlParams.get("orderId");
+    if (orderId) {
+      trackOrder(orderId);
+    } else {
+      errorMsg.textContent = "Missing order ID in URL.";
+      errorMsg.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
