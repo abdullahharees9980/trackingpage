@@ -156,7 +156,7 @@
 
         const data = doc.data();
 
-        if (["cancelled", "delivered"].includes(data.status)) {
+        if (["cancelled", "order_delivered"].includes(data.status)) {
           expiredNotice.style.display = "block";
           clearAll();
           return;
