@@ -13,7 +13,7 @@
     #map {
       height: 100%;
       width: 100%;
-      display: none; /* Will be shown when map is initialized */
+      display: none; 
     }
     #expiredNotice {
       position: absolute;
@@ -233,7 +233,7 @@ function getRotatedIcon(angle) {
 
         const data = doc.data();
 
-        if (["cancelled", "order_delivered"].includes(data.status)) {
+        if (["cancelled", "order_delivered","resolved","unresolved"].includes(data.status)) {
           expiredNotice.style.display = "block";
           clearAll();
           return;
